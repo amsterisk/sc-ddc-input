@@ -1,16 +1,19 @@
 # DDC Monitor Input
 
-A [StreamController](https://github.com/StreamController/StreamController) plugin that cycles a monitor's
-input source from a Stream Deck key using [`ddcutil`](https://www.ddcutil.com/) (VCP feature `0x60`).
+A [StreamController](https://github.com/StreamController/StreamController) plugin that switches monitor
+inputs from a Stream Deck key using [`ddcutil`](https://www.ddcutil.com/) (VCP feature `0x60`).
 
-On press it reads the monitor's current input, switches to the next one in a configurable cycle, and
-updates the key label. While switching it shows a spinner and ignores further presses; in the background
-it polls the monitor so the label stays correct even if you switch inputs by other means (the monitor's
-OSD or another machine).
+It models your setup as **monitors** and **states** (scenes). A *state* maps some or all of your monitors
+to specific inputs — e.g. "Work" might put your main display on USB-C and a second display on HDMI-1. A
+single key cycles through your states, applying the input switches across every monitor at once.
 
 ## Action
 
-**Cycle Monitor Input** (key action) — press to advance to the next input in the cycle.
+**Cycle Monitor State** (key action):
+- The label shows the state that currently matches reality, or **Unknown** if none match.
+- A press applies the next state in the cycle (or the first state if currently Unknown).
+- While switching it shows a spinner and ignores further presses; in the background it polls so the label
+  stays correct if inputs change by other means (OSD, another machine).
 
 ## Requirements
 
@@ -35,33 +38,42 @@ flatpak kill com.core447.StreamController; flatpak run com.core447.StreamControl
 
 ## Configuration
 
-Open the action's settings to set:
+Monitors and states are **plugin-global**: open **Settings → Plugins → DDC Monitor Input → Open
+Settings**. Edits save live (no restart needed).
 
-| Field | Meaning | Default |
-|-------|---------|---------|
-| **Monitor serial number** | Targets the monitor by EDID serial (`ddcutil --sn`), stable across reboots. Empty = ddcutil's default display. | _(empty)_ |
-| **Input cycle** | Comma-separated VCP `0x60` values to cycle through, in order. | `11,0f` |
-| **Labels** | `hex=Name` pairs shown on the key per input. | `01=VGA,03=DVI,0f=DP-1,10=DP-2,11=HDMI-1,12=HDMI-2,1b=USB-C` |
-| **Poll interval (s)** | How often to re-read the monitor to catch external switches. `0` disables. | `5` |
+**Monitors** — add each monitor you want to control:
+- **Name** — a friendly label (shown in the state dropdowns).
+- **Serial** — the monitor's EDID serial (stable across reboots). Leave blank to use ddcutil's default
+  display.
+- **Inputs** — the input sources, as `hex=Name` pairs, e.g. `1b=USB-C,0f=DP-1,11=HDMI-1,12=HDMI-2`.
+- **Detect connected** auto-adds the monitors ddcutil sees, pre-filling serials and inputs from each
+  monitor's reported capabilities.
 
-The defaults use standard MCCS input-source codes and cycle HDMI-1 ⇄ DisplayPort-1. Find your monitor's
-serial and the input codes it actually supports with:
+**States** (cycle order) — add each scene:
+- **Name** — e.g. Home, Work, Games.
+- A dropdown **per monitor** selects that monitor's input for the state (or `—` to leave it out).
+
+Per-key and diagnostics:
+- **Poll interval (s)** (on the key's action settings) — how often to re-check the monitors; `0` disables.
+- **Debug timing logs** (plugin settings) — logs per-read/per-set/total DDC timings to the app log
+  (`~/.var/app/com.core447.StreamController/data/logs/logs.log`).
+
+Find serials and supported input codes manually with:
 
 ```sh
 ddcutil detect
 ddcutil --sn <SERIAL> capabilities   # look for "Feature: 60 (Input Source)"
 ```
 
-Then set the serial, cycle (the codes you want to toggle, in order), and labels for your own monitor.
-Example for a Dell U4924DW toggling USB-C ⇄ HDMI-1: cycle `1b,11`, labels `1b=Work,11=Home`.
+## Behaviour notes
 
-## Notes
-
-- Switching the monitor *away* from the machine running StreamController still works as long as that
-  machine can reach the monitor over DDC on its connected input (verified on the U4924DW). DDC reads are
-  slightly flakier while the monitor is showing another input, so reads retry.
-- Polling issues a `getvcp` every *N* seconds; raise the interval or set it to `0` if you'd rather it
-  only update on press.
+- **Matching**: a state matches when every monitor it lists that is currently present matches its wanted
+  input. Monitors that can't be found are ignored (in both matching and applying). If several states
+  match, the first in cycle order wins.
+- **No-op**: applying a state only issues `setvcp` for monitors that aren't already on the wanted input.
+- **Parallel**: monitors are read and switched concurrently.
+- Switching a monitor *away* from the machine running StreamController still works as long as that machine
+  can reach the monitor over DDC; reads retry, since DDC is slightly flakier on a non-active input.
 
 ## License
 
