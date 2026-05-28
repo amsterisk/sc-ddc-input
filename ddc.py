@@ -6,6 +6,7 @@ org.freedesktop.Flatpak for exactly this). The host user must be in the `i2c` gr
 """
 
 import os
+import re
 import subprocess
 
 from loguru import logger as log
@@ -80,3 +81,53 @@ def set_input(serial: str, code: str) -> bool:
     """
     r = _run([*_selector(serial), "setvcp", INPUT_SOURCE_VCP, "0x" + _normalize(code)])
     return r is not None and r.returncode == 0
+
+
+def detect_monitors() -> list[dict]:
+    """Return [{'serial', 'model', 'bus'}] for connected DDC-capable monitors."""
+    r = _run(["detect", "--terse"], timeout=30.0)
+    if r is None or r.returncode != 0:
+        return []
+    monitors: list[dict] = []
+    cur: dict = {}
+    for line in r.stdout.splitlines():
+        s = line.strip()
+        if s.startswith("Display "):
+            if cur:
+                monitors.append(cur)
+            cur = {}
+        elif s.startswith("I2C bus:"):
+            cur["bus"] = s.split(":", 1)[1].strip()
+        elif s.startswith("Monitor:"):
+            # value format: "MFG:Model:Serial"
+            parts = s.split(":", 1)[1].strip().split(":")
+            if len(parts) >= 3:
+                cur["model"] = parts[1].strip()
+                cur["serial"] = parts[2].strip()
+    if cur:
+        monitors.append(cur)
+    return [m for m in monitors if m.get("serial")]
+
+
+def get_capabilities_inputs(serial: str) -> list[dict]:
+    """Return [{'hex', 'name'}] for the input sources VCP 0x60 reports as supported."""
+    r = _run([*_selector(serial), "capabilities"], timeout=30.0)
+    if r is None or r.returncode != 0:
+        return []
+    inputs: list[dict] = []
+    in_feature = False
+    for line in r.stdout.splitlines():
+        s = line.strip()
+        if s.startswith("Feature: 60"):
+            in_feature = True
+            continue
+        if in_feature:
+            if s.startswith("Feature:"):
+                break
+            m = re.match(r"^([0-9a-fA-F]{1,2}):\s*(.*)$", s)
+            if m:
+                name = m.group(2).strip()
+                if name.lower() == "unrecognized value":
+                    name = ""
+                inputs.append({"hex": m.group(1).lower().zfill(2), "name": name})
+    return inputs

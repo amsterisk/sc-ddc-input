@@ -1,7 +1,7 @@
 {
     "id": "com_amsterisk_DDCInput",
     "name": "DDC Monitor Input",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "github": "https://github.com/amsterisk/sc-ddc-input",
     "tags": ["Utility", "Monitor"],
     "minimum-app-version": "1.0.0",
