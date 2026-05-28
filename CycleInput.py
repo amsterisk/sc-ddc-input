@@ -14,10 +14,11 @@ from src.backend.PluginManager.ActionBase import ActionBase
 
 from .ddc import get_input, set_input
 
-# Defaults target the Dell U4924DW: cycle USB-C (Work) <-> HDMI-1 (Home).
-DEFAULT_SERIAL = "8KKZ0S3"
-DEFAULT_CYCLE = "1b,11"
-DEFAULT_LABELS = "1b=Work,11=Home,0f=DP-1,12=HDMI-2"
+# Generic defaults using standard MCCS input-source codes (VCP 0x60). Configure
+# per-monitor in the action settings. Empty serial = ddcutil's default display.
+DEFAULT_SERIAL = ""
+DEFAULT_CYCLE = "11,0f"  # HDMI-1 <-> DisplayPort-1
+DEFAULT_LABELS = "01=VGA,03=DVI,0f=DP-1,10=DP-2,11=HDMI-1,12=HDMI-2,1b=USB-C"
 DEFAULT_POLL = 5  # seconds between background state polls; 0 disables
 
 _SPINNER_FRAMES = None

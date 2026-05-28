@@ -39,20 +39,21 @@ Open the action's settings to set:
 
 | Field | Meaning | Default |
 |-------|---------|---------|
-| **Monitor serial number** | Targets the monitor by EDID serial (`ddcutil --sn`), stable across reboots. | `8KKZ0S3` |
-| **Input cycle** | Comma-separated VCP `0x60` values to cycle through, in order. | `1b,11` |
-| **Labels** | `hex=Name` pairs shown on the key per input. | `1b=Work,11=Home,0f=DP-1,12=HDMI-2` |
+| **Monitor serial number** | Targets the monitor by EDID serial (`ddcutil --sn`), stable across reboots. Empty = ddcutil's default display. | _(empty)_ |
+| **Input cycle** | Comma-separated VCP `0x60` values to cycle through, in order. | `11,0f` |
+| **Labels** | `hex=Name` pairs shown on the key per input. | `01=VGA,03=DVI,0f=DP-1,10=DP-2,11=HDMI-1,12=HDMI-2,1b=USB-C` |
 | **Poll interval (s)** | How often to re-read the monitor to catch external switches. `0` disables. | `5` |
 
-Find your monitor's serial and the input codes it supports with:
+The defaults use standard MCCS input-source codes and cycle HDMI-1 ⇄ DisplayPort-1. Find your monitor's
+serial and the input codes it actually supports with:
 
 ```sh
 ddcutil detect
 ddcutil --sn <SERIAL> capabilities   # look for "Feature: 60 (Input Source)"
 ```
 
-The defaults target a Dell U4924DW cycling USB-C (`1b`, "Work") ⇄ HDMI-1 (`11`, "Home"). Adjust the
-serial, cycle, and labels for your own monitor.
+Then set the serial, cycle (the codes you want to toggle, in order), and labels for your own monitor.
+Example for a Dell U4924DW toggling USB-C ⇄ HDMI-1: cycle `1b,11`, labels `1b=Work,11=Home`.
 
 ## Notes
 
