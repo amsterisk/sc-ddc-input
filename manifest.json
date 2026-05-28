@@ -1,0 +1,17 @@
+{
+    "id": "com_amsterisk_DDCInput",
+    "name": "DDC Monitor Input",
+    "version": "0.1.0",
+    "github": "https://github.com/amsterisk/sc-ddc-input",
+    "tags": ["Utility", "Monitor"],
+    "minimum-app-version": "1.0.0",
+    "app-version": "1.5.0-beta",
+    "descriptions": {
+        "en_US": "Cycle a monitor's input source (e.g. USB-C / HDMI) using ddcutil."
+    },
+    "short-descriptions": {
+        "en_US": "Switch monitor input via ddcutil"
+    },
+    "description": "Cycle a monitor's input source (e.g. USB-C / HDMI) using ddcutil.",
+    "short-description": "Switch monitor input via ddcutil"
+}
