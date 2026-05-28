@@ -47,6 +47,7 @@ class PluginSettings:
         self.config = {"monitors": [], "states": []}
         self.group = None
         self._rows = []
+        self._state_combos = {}  # serial -> [ComboRow]; retitled live on monitor rename
 
     def get_settings_area(self) -> Adw.PreferencesGroup:
         self.config = config.load(self.plugin_base)
@@ -67,6 +68,7 @@ class PluginSettings:
         for r in self._rows:
             self.group.remove(r)
         self._rows = []
+        self._state_combos = {}
 
         self._add(self._header("Monitors"))
         for idx, mon in enumerate(self.config["monitors"]):
@@ -126,7 +128,10 @@ class PluginSettings:
     def _on_mon_field(self, entry, _pspec, idx, key, exp):
         self.config["monitors"][idx][key] = entry.get_text()
         if key == "name":
-            exp.set_title(entry.get_text() or self.config["monitors"][idx].get("serial") or "Monitor")
+            serial = self.config["monitors"][idx].get("serial", "")
+            exp.set_title(entry.get_text() or serial or "Monitor")
+            for combo in self._state_combos.get(serial, []):
+                combo.set_title(entry.get_text() or serial)
         elif key == "serial":
             exp.set_subtitle(entry.get_text())
         self._save()
@@ -203,6 +208,7 @@ class PluginSettings:
         cur = st.get("targets", {}).get(serial)
         combo.set_selected(hexes.index(cur) + 1 if cur in hexes else 0)
         combo.connect("notify::selected", self._on_state_target, state_idx, serial, hexes)
+        self._state_combos.setdefault(serial, []).append(combo)
         return combo
 
     def _on_state_name(self, entry, _pspec, idx, exp):
