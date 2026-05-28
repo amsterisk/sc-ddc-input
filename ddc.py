@@ -8,6 +8,7 @@ org.freedesktop.Flatpak for exactly this). The host user must be in the `i2c` gr
 import os
 import re
 import subprocess
+import threading
 
 from loguru import logger as log
 
@@ -41,8 +42,47 @@ def _run(args: list[str], timeout: float = 20.0, quiet: bool = False) -> subproc
     return r
 
 
+# Serial -> i2c bus number cache. Targeting by --bus is far faster than --sn
+# (which scans every bus) and, unlike --sn, is safe to run in parallel across
+# monitors. The cache is refreshed via `ddcutil detect` on a miss and dropped
+# for a serial whenever one of its commands fails (e.g. bus renumbered).
+_BUS_CACHE: dict[str, str] = {}
+_BUS_LOCK = threading.Lock()
+
+
+def _detect_bus_map() -> dict[str, str]:
+    out = {}
+    for m in detect_monitors():
+        serial = m.get("serial")
+        bus = m.get("bus", "")  # e.g. "/dev/i2c-10"
+        num = "".join(c for c in bus.rsplit("-", 1)[-1] if c.isdigit()) if bus else ""
+        if serial and num:
+            out[serial] = num
+    return out
+
+
+def _bus_for(serial: str) -> str | None:
+    if not serial:
+        return None
+    if serial not in _BUS_CACHE:
+        with _BUS_LOCK:
+            if serial not in _BUS_CACHE:
+                _BUS_CACHE.update(_detect_bus_map())
+                # Sentinel: an undetected serial falls back to --sn without
+                # re-running detect on every call (only re-tried after a failure).
+                _BUS_CACHE.setdefault(serial, None)
+    return _BUS_CACHE.get(serial)
+
+
+def _forget_bus(serial: str) -> None:
+    _BUS_CACHE.pop(serial, None)
+
+
 def _selector(serial: str) -> list[str]:
-    return ["--sn", serial] if serial else []
+    if not serial:
+        return []
+    bus = _bus_for(serial)
+    return ["--bus", bus] if bus else ["--sn", serial]
 
 
 def _normalize(code: str) -> str:
@@ -71,6 +111,7 @@ def get_input(serial: str, retries: int = 1, quiet: bool = False) -> str | None:
                 return _normalize(parts[3])
             if not quiet:
                 log.error(f"DDCInput: could not parse getvcp output {r.stdout!r}")
+        _forget_bus(serial)  # drop a possibly-stale bus mapping before retrying
     return None
 
 
@@ -79,8 +120,13 @@ def set_input(serial: str, code: str) -> bool:
 
     ddcutil's setvcp rejects bare hex ('1b'); the value must be 0x-prefixed.
     """
-    r = _run([*_selector(serial), "setvcp", INPUT_SOURCE_VCP, "0x" + _normalize(code)])
-    return r is not None and r.returncode == 0
+    value = "0x" + _normalize(code)
+    for _ in range(2):
+        r = _run([*_selector(serial), "setvcp", INPUT_SOURCE_VCP, value])
+        if r is not None and r.returncode == 0:
+            return True
+        _forget_bus(serial)  # bus may have renumbered; re-resolve on retry
+    return False
 
 
 def detect_monitors() -> list[dict]:

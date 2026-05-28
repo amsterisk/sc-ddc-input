@@ -79,7 +79,21 @@ class PluginSettings:
         for idx, st in enumerate(self.config["states"]):
             self._add(self._state_row(idx, st))
         self._add(self._state_add_row())
+
+        self._add(self._header("Options"))
+        self._add(self._debug_row())
         return False  # usable as a GLib.idle_add callback
+
+    def _debug_row(self) -> Adw.SwitchRow:
+        row = Adw.SwitchRow(title="Debug timing logs",
+                            subtitle="Log DDC read/set timings to the app log")
+        row.set_active(bool(self.config.get("debug", False)))
+        row.connect("notify::active", self._on_debug_toggle)
+        return row
+
+    def _on_debug_toggle(self, row, _pspec):
+        self.config["debug"] = row.get_active()
+        self._save()
 
     def _header(self, text: str) -> Adw.ActionRow:
         row = Adw.ActionRow(title=f"<b>{text}</b>")

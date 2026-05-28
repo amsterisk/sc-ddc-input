@@ -49,7 +49,9 @@ class CycleState(ActionBase):
         self._spin_thread = None
         self._poll_ticks = 0
         self._polling = False
+        self._poll_fail_streak = 0  # consecutive all-unreadable polls -> back off
         self._last_shown = None
+        self._ddc_lock = threading.Lock()  # serializes poll reads vs press read+apply
 
     def _poll_secs(self) -> int:
         return int(self.get_settings().get("poll", DEFAULT_POLL) or 0)
@@ -77,7 +79,10 @@ class CycleState(ActionBase):
         if poll <= 0 or self._busy or self._polling or not self.get_is_present():
             return
         self._poll_ticks += 1
-        if self._poll_ticks < poll:
+        # Back off (up to 16x) while monitors are unreachable, so a wedged/missing
+        # monitor isn't hammered with a slow scan every interval.
+        required = poll * (2 ** min(self._poll_fail_streak, 4))
+        if self._poll_ticks < required:
             return
         self._poll_ticks = 0
         self._polling = True
@@ -85,11 +90,25 @@ class CycleState(ActionBase):
 
     def _poll_once(self):
         try:
+            # Skip entirely if a transition is in progress or starting (can't get
+            # the DDC lock) — polling mid-switch reads transitional state.
+            if self._busy or not self._ddc_lock.acquire(blocking=False):
+                return
             cfg = self._cfg()
-            readings = engine.read_inputs(cfg["monitors"])
-            name = engine.match_state(cfg["states"], readings) or UNKNOWN
-            if name != self._last_shown:
-                self._show(name)
+            try:
+                # Cheap: single-try, quiet (no error spam) — polling shouldn't retry.
+                readings = engine.read_inputs(cfg["monitors"], quiet=True, retries=0,
+                                              debug=cfg.get("debug", False))
+            finally:
+                self._ddc_lock.release()
+            if readings and all(v is None for v in readings.values()):
+                self._poll_fail_streak += 1
+            else:
+                self._poll_fail_streak = 0
+            if not self._busy:
+                name = engine.match_state(cfg["states"], readings) or UNKNOWN
+                if name != self._last_shown:
+                    self._show(name)
         finally:
             self._polling = False
 
@@ -98,6 +117,8 @@ class CycleState(ActionBase):
         if self._busy:
             return
         self._busy = True
+        self._poll_fail_streak = 0
+        self._poll_ticks = 0
         GLib.idle_add(self.set_center_label, "")
         self._start_spinner()
         threading.Thread(target=self._cycle, name="DDCCycle", daemon=True).start()
@@ -107,21 +128,30 @@ class CycleState(ActionBase):
         ok = False
         try:
             cfg = self._cfg()
+            debug = cfg.get("debug", False)
             states = cfg["states"]
             if not states:
                 log.warning("DDCInput: no states configured")
                 return
-            readings = engine.read_inputs(cfg["monitors"])
-            current = engine.match_state(states, readings)
-            target_name = engine.next_state_name(states, current)
-            target = engine.state_by_name(states, target_name)
-            if target is None:
-                return
-            applied = target_name
-            results = engine.apply_state(target)
-            ok = (not results) or any(results.values())
-            if not ok:
-                log.error(f"DDCInput: failed to apply state {target_name!r}: {results}")
+            with self._ddc_lock:
+                t0 = time.monotonic()
+                readings = engine.read_inputs(cfg["monitors"], debug=debug)
+                t_read = time.monotonic()
+                current = engine.match_state(states, readings)
+                target_name = engine.next_state_name(states, current)
+                target = engine.state_by_name(states, target_name)
+                if target is None:
+                    return
+                applied = target_name
+                results = engine.apply_state(target, current=readings, debug=debug)
+                ok = (not results) or any(results.values())
+                if debug:
+                    t_end = time.monotonic()
+                    log.info(f"DDCInput[timing]: {current!r} -> {target_name!r} | "
+                             f"read {t_read - t0:.2f}s, apply {t_end - t_read:.2f}s, "
+                             f"total {t_end - t0:.2f}s | results={results}")
+                if not ok:
+                    log.error(f"DDCInput: failed to apply state {target_name!r}: {results}")
         finally:
             self._busy = False
             if self._spin_thread is not None:
@@ -174,6 +204,8 @@ class CycleState(ActionBase):
         GLib.idle_add(self._render_label, name or UNKNOWN)
 
     def _render_label(self, text):
+        if self._busy:
+            return False  # a transition is in progress; don't paint over the spinner
         try:
             self.hide_error()
         except Exception:

@@ -20,6 +20,7 @@ def load(plugin_base) -> dict:
     return {
         "monitors": s.get("monitors", []),
         "states": s.get("states", []),
+        "debug": bool(s.get("debug", False)),
     }
 
 
@@ -27,6 +28,8 @@ def save(plugin_base, config: dict) -> None:
     s = plugin_base.get_settings() or {}
     s["monitors"] = config.get("monitors", [])
     s["states"] = config.get("states", [])
+    if "debug" in config:
+        s["debug"] = bool(config["debug"])
     plugin_base.set_settings(s)
 
 
