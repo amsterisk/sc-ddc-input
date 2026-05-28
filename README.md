@@ -4,16 +4,23 @@ A [StreamController](https://github.com/StreamController/StreamController) plugi
 inputs from a Stream Deck key using [`ddcutil`](https://www.ddcutil.com/) (VCP feature `0x60`).
 
 It models your setup as **monitors** and **states** (scenes). A *state* maps some or all of your monitors
-to specific inputs — e.g. "Work" might put your main display on USB-C and a second display on HDMI-1. A
-single key cycles through your states, applying the input switches across every monitor at once.
+to specific inputs — e.g. "Work" might put your main display on USB-C and a second display on HDMI-1.
+Monitors and states are defined once (plugin-wide); each key then chooses which states it cycles and in
+what order — or a single state, to act as a direct-select button.
 
 ## Action
 
-**Cycle Monitor State** (key action):
-- The label shows the state that currently matches reality, or **Unknown** if none match.
-- A press applies the next state in the cycle (or the first state if currently Unknown).
-- While switching it shows a spinner and ignores further presses; in the background it polls so the label
-  stays correct if inputs change by other means (OSD, another machine).
+**Cycle Monitor State** (key action). Each key draws a small **monitor icon** (top-left) and, when it
+cycles more than one state, a **cycle icon** (top-right); the matched **state name** is shown below centre.
+
+- Reads the monitors and shows the state matching reality, or **Unknown** if none match.
+- A press applies the next state in the key's list (or the first if currently Unknown), switching every
+  reachable monitor at once. A spinner shows during the switch and further presses are ignored until done.
+- A key set to a **single** state is a direct-select button: it always shows that state's name and applies
+  it on press.
+- It polls in the background so the label stays correct when inputs change by other means (OSD, another
+  machine). Multiple keys coordinate through the monitors' real state and share a lock, so they never drive
+  the bus at the same time.
 
 ## Requirements
 
@@ -53,8 +60,13 @@ Settings**. Edits save live (no restart needed).
 - **Name** — e.g. Home, Work, Games.
 - A dropdown **per monitor** selects that monitor's input for the state (or `—` to leave it out).
 
-Per-key and diagnostics:
-- **Poll interval (s)** (on the key's action settings) — how often to re-check the monitors; `0` disables.
+**Per key** (the key's action settings):
+- **States to cycle (in order)** — comma-separated state names, e.g. `Work, Home`. The order is the cycle
+  order. Leave **empty** to cycle all states (plugin order); enter a **single** name for a direct-select
+  key. The *Available states* row lists the valid names.
+- **Poll interval (s)** — how often to re-check the monitors; `0` disables (single-state keys never poll).
+
+**Diagnostics:**
 - **Debug timing logs** (plugin settings) — logs per-read/per-set/total DDC timings to the app log
   (`~/.var/app/com.core447.StreamController/data/logs/logs.log`).
 
@@ -69,11 +81,16 @@ ddcutil --sn <SERIAL> capabilities   # look for "Feature: 60 (Input Source)"
 
 - **Matching**: a state matches when every monitor it lists that is currently present matches its wanted
   input. Monitors that can't be found are ignored (in both matching and applying). If several states
-  match, the first in cycle order wins.
-- **No-op**: applying a state only issues `setvcp` for monitors that aren't already on the wanted input.
-- **Parallel**: monitors are read and switched concurrently.
-- Switching a monitor *away* from the machine running StreamController still works as long as that machine
-  can reach the monitor over DDC; reads retry, since DDC is slightly flakier on a non-active input.
+  match, the first in cycle order wins. A switch is only treated as "achieved" once every reachable
+  monitor actually switched — otherwise the key shows the real state with an error indicator.
+- **No-op**: applying a state only issues `setvcp` for monitors not already on the wanted input.
+- **Parallel & fast**: monitors are targeted by i2c bus (resolved from serial, then cached) and read /
+  switched concurrently, so a multi-monitor switch typically completes in well under a second.
+- **Coordination**: all keys share one DDC lock, so concurrent presses queue rather than collide on the
+  bus, and polling pauses during a switch.
+- **Resilience**: a transient failed read keeps the last label instead of flashing "Unknown"; reads retry,
+  since DDC is slightly flakier while a monitor shows a non-active input. Switching a monitor *away* from
+  the machine running StreamController still works as long as that machine can reach it over DDC.
 
 ## License
 
