@@ -7,7 +7,6 @@ from src.backend.PluginManager.ActionInputSupport import ActionInputSupport
 from src.backend.DeckManagement.InputIdentifier import Input
 
 from .CycleState import CycleState
-from .CycleInput import CycleInput
 from .settings_ui import PluginSettings
 
 sys.path.append(os.path.dirname(__file__))
@@ -31,16 +30,6 @@ class DDCInputPlugin(PluginBase):
             action_support=dict(_SUPPORT),
         )
         self.add_action_holder(self.cycle_state_holder)
-
-        # Legacy single-monitor action, kept so existing keys keep working.
-        self.cycle_input_holder = ActionHolder(
-            plugin_base=self,
-            action_base=CycleInput,
-            action_id_suffix="CycleInput",
-            action_name="Cycle Monitor Input (legacy)",
-            action_support=dict(_SUPPORT),
-        )
-        self.add_action_holder(self.cycle_input_holder)
 
         self.register(
             plugin_name="DDC Monitor Input",
