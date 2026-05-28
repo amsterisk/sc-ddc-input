@@ -125,7 +125,8 @@ class CycleState(ActionBase):
 
     def _cycle(self):
         applied = None
-        ok = False
+        achieved = False
+        actual_name = None
         try:
             cfg = self._cfg()
             debug = cfg.get("debug", False)
@@ -144,25 +145,33 @@ class CycleState(ActionBase):
                     return
                 applied = target_name
                 results = engine.apply_state(target, current=readings, debug=debug)
-                ok = (not results) or any(results.values())
+                # Achieved only if every *reachable* target monitor switched (or was
+                # already correct). Unreachable monitors are ignored; if none were
+                # reachable, the state wasn't realised.
+                present = [s for s in target.get("targets", {}) if readings.get(s) is not None]
+                achieved = bool(present) and all(results.get(s) for s in present)
                 if debug:
                     t_end = time.monotonic()
                     log.info(f"DDCInput[timing]: {current!r} -> {target_name!r} | "
                              f"read {t_read - t0:.2f}s, apply {t_end - t_read:.2f}s, "
-                             f"total {t_end - t0:.2f}s | results={results}")
-                if not ok:
-                    log.error(f"DDCInput: failed to apply state {target_name!r}: {results}")
+                             f"total {t_end - t0:.2f}s | achieved={achieved} results={results}")
+                if not achieved:
+                    log.error(f"DDCInput: state {target_name!r} not fully applied: "
+                              f"readings={readings} results={results}")
+                    # Show reality, not the target we failed to reach.
+                    actual = engine.read_inputs(cfg["monitors"], quiet=True, retries=0)
+                    actual_name = engine.match_state(states, actual) or UNKNOWN
         finally:
             self._busy = False
             if self._spin_thread is not None:
                 self._spin_thread.join(timeout=0.5)
             if applied is None:
                 GLib.idle_add(self._clear_image)
-            elif ok:
+            elif achieved:
                 self._show(applied)
             else:
-                self._last_shown = None
-                GLib.idle_add(self._render_error, applied)
+                self._last_shown = actual_name
+                GLib.idle_add(self._render_error, actual_name or UNKNOWN)
 
     # ---------- spinner ----------
     def _start_spinner(self):
