@@ -181,9 +181,18 @@ class PluginSettings:
 
     def _apply_detect(self, found):
         existing = {m.get("serial") for m in self.config["monitors"]}
+        used_names = {m.get("name") for m in self.config["monitors"] if m.get("name")}
         for m in found:
-            if m["serial"] not in existing:
-                self.config["monitors"].append(m)
+            if m["serial"] in existing:
+                continue
+            # Disambiguate identical model names (e.g. two same-model LG panels)
+            # so they're tellable apart in the UI before the user renames them.
+            base = m["name"]
+            if base in used_names:
+                tag = m["serial"].split(":")[-1][-4:]
+                m["name"] = f"{base} ({tag})"
+            used_names.add(m["name"])
+            self.config["monitors"].append(m)
         self._save()
         self._rebuild()
         return False

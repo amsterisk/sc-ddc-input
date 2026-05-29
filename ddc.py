@@ -82,7 +82,16 @@ def _selector(serial: str) -> list[str]:
     if not serial:
         return []
     bus = _bus_for(serial)
-    return ["--bus", bus] if bus else ["--sn", serial]
+    if bus:
+        return ["--bus", bus]
+    # No cached bus: a "BUS:n" identity still names its bus directly. Synthetic
+    # identities (no real ASCII serial) can't use --sn, so let the command fail
+    # cleanly rather than silently target ddcutil's default display.
+    if serial.startswith("BUS:"):
+        return ["--bus", serial[4:]]
+    if serial.startswith(("BSN:", "DRM:")):
+        return ["--sn", "\x00__no_such_monitor__"]
+    return ["--sn", serial]
 
 
 def _normalize(code: str) -> str:
@@ -129,30 +138,63 @@ def set_input(serial: str, code: str) -> bool:
     return False
 
 
+def _identity(ascii_sn: str, binary_sn: str, connector: str, bus: str) -> str:
+    """A stable per-monitor key.
+
+    Prefer the EDID ASCII serial; many monitors (e.g. some LG panels) leave it
+    blank, so fall back to the binary serial (still unique per physical panel and
+    stable across reboots), then the DRM connector, then the i2c bus.
+    """
+    if ascii_sn:
+        return ascii_sn
+    if binary_sn and binary_sn not in ("0", "0x0", "0x00000000"):
+        return f"BSN:{binary_sn}"
+    if connector:
+        return f"DRM:{connector}"
+    return f"BUS:{bus}" if bus else ""
+
+
 def detect_monitors() -> list[dict]:
-    """Return [{'serial', 'model', 'bus'}] for connected DDC-capable monitors."""
-    r = _run(["detect", "--terse"], timeout=30.0)
+    """Return [{'serial', 'model', 'bus'}] for connected DDC-capable monitors.
+
+    `serial` is a stable identity (see _identity); monitors without an ASCII EDID
+    serial are kept and keyed by their binary serial, so identical-model panels
+    (which often share a blank ASCII serial) are still told apart. The full (non
+    -terse) `detect` output is parsed because `--terse` omits the binary serial.
+    """
+    r = _run(["detect"], timeout=30.0)
     if r is None or r.returncode != 0:
         return []
     monitors: list[dict] = []
     cur: dict = {}
+
+    def flush():
+        if not cur.get("bus"):
+            return
+        ident = _identity(cur.get("ascii_serial", ""), cur.get("binary_serial", ""),
+                          cur.get("connector", ""), cur.get("bus", ""))
+        if ident:
+            monitors.append({"serial": ident, "model": cur.get("model", ""),
+                             "bus": cur.get("bus", "")})
+
     for line in r.stdout.splitlines():
         s = line.strip()
         if s.startswith("Display "):
-            if cur:
-                monitors.append(cur)
+            flush()
             cur = {}
         elif s.startswith("I2C bus:"):
             cur["bus"] = s.split(":", 1)[1].strip()
-        elif s.startswith("Monitor:"):
-            # value format: "MFG:Model:Serial"
-            parts = s.split(":", 1)[1].strip().split(":")
-            if len(parts) >= 3:
-                cur["model"] = parts[1].strip()
-                cur["serial"] = parts[2].strip()
-    if cur:
-        monitors.append(cur)
-    return [m for m in monitors if m.get("serial")]
+        elif s.startswith("DRM connector:"):
+            cur["connector"] = s.split(":", 1)[1].strip()
+        elif s.startswith("Model:"):
+            cur["model"] = s.split(":", 1)[1].strip()
+        elif s.startswith("Serial number:"):
+            cur["ascii_serial"] = s.split(":", 1)[1].strip()
+        elif s.startswith("Binary serial number:"):
+            # value format: "498849 (0x00079ca1)" -> take the decimal token
+            cur["binary_serial"] = s.split(":", 1)[1].strip().split()[0]
+    flush()
+    return monitors
 
 
 def get_capabilities_inputs(serial: str) -> list[dict]:
